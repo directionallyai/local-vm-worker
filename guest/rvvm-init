@@ -1,0 +1,12 @@
+#!/usr/bin/busybox sh
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+mount -t proc proc /proc; mount -t sysfs sysfs /sys; mount -t devtmpfs devtmpfs /dev 2>/dev/null
+NOW=$(sed -n 's/.*now=\([0-9]*\).*/\1/p' /proc/cmdline); [ -n "$NOW" ] && busybox date -s @$NOW >/dev/null
+mount -t tmpfs -o size=16m tmpfs /run; touch /run/resolv.conf; mount -o bind /run/resolv.conf /etc/resolv.conf
+busybox ip link set dev lo up
+busybox ip link set dev eth0 up
+busybox ip addr add 192.168.0.100/24 dev eth0
+busybox ip route add default via 192.168.0.1 dev eth0
+echo 'nameserver 1.1.1.1' > /etc/resolv.conf
+echo "[rvvm] ifaces: $(busybox ip -o link | cut -d: -f2 | tr '\n' ' ') kernel: $(cut -c1-60 /proc/version)"
+mount -t tmpfs -o size=64m,mode=1777 tmpfs /tmp; WARM_CACHE_SCOPE=global WARM_LIB=/opt/worker-runtime/lib/python3.12/site-packages WARM_SOCKET=/tmp/w.sock /opt/worker-runtime/bin/python3.12 /opt/worker-runtime/warm_server.py & LOCAL_WARM_SOCKET=/tmp/w.sock LOCAL_LISTEN=0.0.0.0:8700 LOCAL_RUNTIME_DIR=/opt/worker-runtime LOCAL_SANDBOX=none /opt/bin/session_master_local

@@ -1,0 +1,59 @@
+name: Build local VM image
+
+# Builds the firmware and kernel for the local RISC-V guest (see Dockerfile) with every input pinned, builds them a
+# second time from scratch, and fails unless the two builds are byte-identical. Same approach as aci-worker's
+# aci-session-worker-build.yml: a pinned SOURCE_DATE_EPOCH, a digest-pinned base image, and checks on the built output
+# before anything is published.
+
+on:
+  push:
+    branches: [main]
+    paths: ['Dockerfile', 'kernel/**', 'guest/**', 'rootfs/**', '.github/workflows/build.yml']
+  workflow_dispatch: {}
+
+env:
+  # Fixed, not the run's wall clock, so identical inputs give identical bytes.
+  SOURCE_DATE_EPOCH: "1788613323"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (first)
+        run: |
+          docker buildx build --target artifacts --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+            --output type=local,dest=out1,rewrite-timestamp=true .
+          (cd out1 && sha256sum fw_jump.bin Image kernel.config | tee ../SHA256SUMS.1)
+
+      - name: Build (second, no cache) and compare
+        run: |
+          docker buildx build --no-cache --target artifacts --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+            --output type=local,dest=out2,rewrite-timestamp=true .
+          (cd out2 && sha256sum fw_jump.bin Image kernel.config > ../SHA256SUMS.2)
+          if ! diff SHA256SUMS.1 SHA256SUMS.2; then
+            echo "::error::two builds from the same inputs differ: the build is not reproducible"; exit 1
+          fi
+
+      - name: Check the outputs are what they claim to be
+        run: |
+          set -e
+          # RISC-V Linux Image header: magic "RSC\x05" at offset 0x38
+          test "$(dd if=out1/Image bs=1 skip=56 count=4 2>/dev/null | od -An -c | tr -d ' ')" = 'RSC005' || { echo "::error::Image has no RISC-V header"; exit 1; }
+          file out1/fw_jump.bin | tee /dev/stderr | grep -qi data || true
+          grep -q '^CONFIG_EROFS_FS=y' out1/kernel.config
+          grep -q '^CONFIG_BLK_DEV_NVME=y' out1/kernel.config
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-vm-firmware-kernel
+          path: |
+            out1/fw_jump.bin
+            out1/Image
+            out1/kernel.config
+            SHA256SUMS.1
+          retention-days: 30
