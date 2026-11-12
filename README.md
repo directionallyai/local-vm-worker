@@ -15,7 +15,7 @@ What is built here, all with pinned inputs and no riscv64 code executed at build
 docker buildx build --target artifacts --output type=local,dest=out .
 ```
 
-The base image is pinned by digest and apt reads `snapshot.debian.org` at a fixed timestamp, so the toolchain does not move.
+The base is Ubuntu 24.04, pinned by image digest, and apt reads `snapshot.ubuntu.com` at a fixed timestamp for both amd64 (the cross toolchain) and riscv64 (the guest userland), so the toolchain does not move. The rootfs (`--target rootfs`: worker-only erofs plus `.xz`) is built from pinned inputs and checked for byte-for-byte reproducibility in CI.
 CI (`.github/workflows/build.yml`) builds twice and fails if the results differ.
 
 ## Status

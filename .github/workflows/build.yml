@@ -29,12 +29,18 @@ jobs:
           docker buildx build --target artifacts --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
             --output type=local,dest=out1,rewrite-timestamp=true .
           (cd out1 && sha256sum fw_jump.bin Image kernel.config | tee ../SHA256SUMS.1)
+          docker buildx build --target rootfs --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+            --output type=local,dest=rootfs1,rewrite-timestamp=true .
+          (cd rootfs1 && sha256sum rootfs.erofs rootfs.erofs.xz | tee -a ../SHA256SUMS.1)
 
       - name: Build (second, no cache) and compare
         run: |
           docker buildx build --no-cache --target artifacts --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
             --output type=local,dest=out2,rewrite-timestamp=true .
           (cd out2 && sha256sum fw_jump.bin Image kernel.config > ../SHA256SUMS.2)
+          docker buildx build --no-cache --target rootfs --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+            --output type=local,dest=rootfs2,rewrite-timestamp=true .
+          (cd rootfs2 && sha256sum rootfs.erofs rootfs.erofs.xz >> ../SHA256SUMS.2)
           if ! diff SHA256SUMS.1 SHA256SUMS.2; then
             echo "::error::two builds from the same inputs differ: the build is not reproducible"; exit 1
           fi
@@ -55,5 +61,6 @@ jobs:
             out1/fw_jump.bin
             out1/Image
             out1/kernel.config
+            rootfs1/rootfs.erofs.xz
             SHA256SUMS.1
           retention-days: 30
