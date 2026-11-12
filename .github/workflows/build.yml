@@ -8,7 +8,7 @@ name: Build local VM image
 on:
   push:
     branches: [main]
-    paths: ['Dockerfile', 'kernel/**', 'guest/**', 'rootfs/**', '.github/workflows/build.yml']
+    paths: ['Dockerfile', 'kernel/**', 'guest/**', 'local/**', 'rootfs/**', '.github/workflows/build.yml']
   workflow_dispatch: {}
 
 env:

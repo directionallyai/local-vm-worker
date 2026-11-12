@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds the riscv64 worker runtime directory (python-build-standalone + the worker's locked packages + worker.py,
 # storage.py) and session_master_local, all cross-compiled; nothing riscv64 is executed. Run inside the `rt-build` stage.
-# Inputs: /pbs/python (verified riscv64 PBS tree), /hostpy/python (verified x86_64 PBS, same 3.12.16: bytecode + build venv), /src/wpr (worker-python-runtime checkout), /src/aci (aci-worker checkout).
+# Inputs: /pbs/python (verified riscv64 PBS tree), /hostpy/python (verified x86_64 PBS, same 3.12.16: bytecode + build venv), /src/wpr (worker-python-runtime checkout), /src/aci (aci-worker checkout), /src/local/warm_server.py (this repo).
 # Outputs: /out/runtime, /out/session_master_local, /out/warm_server.py
 set -eu
 RUST_TARGET=riscv64gc-unknown-linux-gnu
@@ -74,7 +74,7 @@ install -m 0644 /src/wpr/worker.py /src/wpr/storage.py "$SP"/
 printf '%s\n' '#!/bin/sh' 'set -e' 'here="$(cd "$(dirname "$0")" && pwd)"' \
   'exec "$here/bin/python3.12" -c "import worker; worker.main()"' > "$R/runtime"
 chmod 0755 "$R/runtime"
-install -m 0755 /src/aci/local/warm_server.py "$R"/warm_server.py
+install -m 0755 /src/local/warm_server.py "$R"/warm_server.py
 # Byte-compile with the build host's python (same 3.12 bytecode); unchecked-hash so mtimes do not matter.
 /hostpy/python/bin/python3.12 -m compileall -q -j 0 --invalidation-mode unchecked-hash "$R/lib/python3.12"
 

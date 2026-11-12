@@ -21,9 +21,10 @@ CI (`.github/workflows/build.yml`) builds twice and fails if the results differ.
 ## Status
 
 - Firmware and kernel: Dockerfile and CI written.
-- Rootfs: not built here yet. Today it is assembled by hand from the Cartesi Ubuntu base, a cross-built uv/CPython runtime,
-  `worker.py`/`storage.py`, `warm_server.py` (aci-worker) and `session_master_local`. The recipes are in aci-worker
-  `local/cartesi/`.
+- Rootfs: built by the `rootfs` target (cross-built runtime, `worker.py`/`storage.py`, `session_master_local` from aci-worker
+  at a pinned commit, and `local/warm_server.py` from this repo).
+- `local/`: `warm_server.py` (the warm Python server the guest runs, with its tests) and `trace_server.py`. Tests:
+  `python3 -I -m unittest discover -s local -p 'test_warm_server.py'`.
 - `kernel/rvvm.config` comes from a Cartesi 6.18.56 tree (a patched kernel) and is applied to the mainline tarball with
   `olddefconfig`, which drops the Cartesi-only options. Whether a mainline build boots the full rootfs is checked by the
   boot test, not assumed.

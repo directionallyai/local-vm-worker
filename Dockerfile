@@ -86,7 +86,7 @@ ARG PBS_RELEASE=20261026
 ARG PBS_PYTHON=3.12.16
 ARG PBS_RISCV64_SHA256=4090e42b060cc5dadfa8ba26556efff4db841dce05cecb1b3645a17d1a93ae4e
 ARG PBS_X86_64_SHA256=ce4f6d0a6cfdb3bed6e44c2f9affd85943c76a42e25ad3a259002f31d6fb8a20
-ARG ACI_WORKER_COMMIT=095c9815509abcb05a5718c41c373fb20cada347
+ARG ACI_WORKER_COMMIT=bc045fce69ea5ae62be0343bfb5a6e134e62477e
 ARG WORKER_PYTHON_RUNTIME_COMMIT=58d417559069e7a7a804529e522bbeb6c2d065a2
 ARG SOURCE_DATE_EPOCH
 RUN retry sh -c 'apt-get update -qq -o APT::Update::Error-Mode=any && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
@@ -107,6 +107,7 @@ RUN git init -q /src/aci && git -C /src/aci fetch -q --depth 1 https://github.co
  && git -C /src/aci checkout -q FETCH_HEAD \
  && git init -q /src/wpr && git -C /src/wpr fetch -q --depth 1 https://github.com/directionallyai/worker-python-runtime "${WORKER_PYTHON_RUNTIME_COMMIT}" \
  && git -C /src/wpr checkout -q FETCH_HEAD
+COPY local/warm_server.py /src/local/warm_server.py
 COPY rootfs/build-runtime.sh /build-runtime.sh
 RUN /build-runtime.sh
 
