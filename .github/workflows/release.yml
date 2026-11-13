@@ -28,7 +28,7 @@ jobs:
         run: |
           set -e
           case "$RUN_ID" in ''|*[!0-9]*) echo "::error::run_id must be a number"; exit 1;; esac
-          read -r name branch conclusion sha < <(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json workflowName,headBranch,conclusion,headSha -q '[.workflowName,.headBranch,.conclusion,.headSha]|@tsv')
+          IFS=$'\t' read -r name branch conclusion sha < <(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json workflowName,headBranch,conclusion,headSha -q '[.workflowName,.headBranch,.conclusion,.headSha]|@tsv')
           echo "run $RUN_ID: $name on $branch = $conclusion at $sha"
           test "$name" = "Build local VM image" && test "$branch" = main && test "$conclusion" = success || { echo "::error::not a successful build run on main"; exit 1; }
           echo "SOURCE_SHA=$sha" >> "$GITHUB_ENV"
