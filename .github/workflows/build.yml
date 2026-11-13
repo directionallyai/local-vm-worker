@@ -9,13 +9,7 @@ on:
   push:
     branches: [main]
     paths: ['Dockerfile', 'kernel/**', 'guest/**', 'local/**', 'rootfs/**', '.github/workflows/build.yml']
-  # Run by hand with `release` set to publish a GitHub release of the verified carrier (see the release job).
-  workflow_dispatch:
-    inputs:
-      release:
-        description: 'Publish a release of the verified files after the build'
-        type: boolean
-        default: false
+  workflow_dispatch: {}
 
 env:
   # Fixed, not the run's wall clock, so identical inputs give identical bytes.
@@ -91,32 +85,3 @@ jobs:
           path: carrier1/
           retention-days: 30
           if-no-files-found: error
-
-  # Publishes the verified carrier as a GitHub release, only when asked for (workflow_dispatch with `release` set), so a
-  # push never publishes anything. The release is the only thing that carries these files out of the repository; the
-  # backend image build downloads it and checks every file against a hash it pins.
-  release:
-    needs: build
-    if: github.event_name == 'workflow_dispatch' && inputs.release
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: local-vm-carrier
-          path: carrier
-      - name: Create the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -e
-          tag="vm-${GITHUB_SHA::12}"
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::error::release $tag already exists"; exit 1
-          fi
-          (cd carrier && sha256sum -c SHA256SUMS)
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "Local VM files $tag" \
-            --notes "Built from $GITHUB_SHA by run $GITHUB_RUN_ID. Built twice and compared: identical. manifest.json names every file by sha256; the backend pins the hash of manifest.json." \
-            carrier/*
