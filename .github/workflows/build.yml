@@ -9,7 +9,13 @@ on:
   push:
     branches: [main]
     paths: ['Dockerfile', 'kernel/**', 'guest/**', 'local/**', 'rootfs/**', '.github/workflows/build.yml']
-  workflow_dispatch: {}
+  # Run by hand with `release` set to publish a GitHub release of the verified carrier (see the release job).
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Publish a release of the verified files after the build'
+        type: boolean
+        default: false
 
 env:
   # Fixed, not the run's wall clock, so identical inputs give identical bytes.
@@ -54,13 +60,63 @@ jobs:
           grep -q '^CONFIG_EROFS_FS=y' out1/kernel.config
           grep -q '^CONFIG_BLK_DEV_NVME=y' out1/kernel.config
 
+      # The carrier is what gets released: the riscv64 guest files (the same for every host), the emulator for the
+      # hosts built here, and manifest.json naming every file by hash. The guest files were just built twice and
+      # compared; rvvm and the manifest are rebuilt from scratch (the stages before them stay cached) and compared too.
+      - name: Build the carrier twice and compare
+        run: |
+          set -e
+          docker buildx build --target carrier --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+            --output type=local,dest=carrier1,rewrite-timestamp=true .
+          docker buildx build --target carrier --no-cache-filter rvvm-build,carrier-tree --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+            --output type=local,dest=carrier2,rewrite-timestamp=true .
+          (cd carrier1 && sha256sum -- * > ../SHA256SUMS.carrier.1)
+          (cd carrier2 && sha256sum -- * > ../SHA256SUMS.carrier.2)
+          if ! diff SHA256SUMS.carrier.1 SHA256SUMS.carrier.2; then
+            echo "::error::two carrier builds from the same inputs differ"; exit 1
+          fi
+          # The guest files in the carrier are the ones compared above.
+          for f in fw_jump.bin Image rootfs.erofs.xz; do
+            want=$(grep " $f\$" SHA256SUMS.1 | cut -d' ' -f1); got=$(grep " $f\$" SHA256SUMS.carrier.1 | cut -d' ' -f1)
+            test -n "$want" && test "$want" = "$got" || { echo "::error::$f in the carrier is not the one built above"; exit 1; }
+          done
+          python3 -c "import json; m=json.load(open('carrier1/manifest.json')); assert m['version']==2 and sorted(m['rvvm'])==['linux-arm64','linux-x86_64','macos-arm64','macos-x86_64','windows-x86_64'], m"
+          cp SHA256SUMS.carrier.1 carrier1/SHA256SUMS
+          # The static emulator must be self-contained.
+          ! ldd carrier1/rvvm-linux-x86_64 2>/dev/null | grep -q '=>'
+
       - uses: actions/upload-artifact@v4
         with:
-          name: local-vm-firmware-kernel
-          path: |
-            out1/fw_jump.bin
-            out1/Image
-            out1/kernel.config
-            rootfs1/rootfs.erofs.xz
-            SHA256SUMS.1
+          name: local-vm-carrier
+          path: carrier1/
           retention-days: 30
+          if-no-files-found: error
+
+  # Publishes the verified carrier as a GitHub release, only when asked for (workflow_dispatch with `release` set), so a
+  # push never publishes anything. The release is the only thing that carries these files out of the repository; the
+  # backend image build downloads it and checks every file against a hash it pins.
+  release:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-vm-carrier
+          path: carrier
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          tag="vm-${GITHUB_SHA::12}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::release $tag already exists"; exit 1
+          fi
+          (cd carrier && sha256sum -c SHA256SUMS)
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Local VM files $tag" \
+            --notes "Built from $GITHUB_SHA by run $GITHUB_RUN_ID. Built twice and compared: identical. manifest.json names every file by sha256; the backend pins the hash of manifest.json." \
+            carrier/*

@@ -146,3 +146,56 @@ FROM scratch AS rootfs
 COPY --from=rootfs-tree /out/rootfs.erofs /rootfs.erofs
 COPY --from=rootfs-tree /out/rootfs.erofs.xz /rootfs.erofs.xz
 COPY --from=rootfs-tree /out/debs.txt /debs.txt
+
+# ---------------------------------------------------------------------------------------------------------------
+# rvvm: the emulator itself, headless and static (no X11, Wayland or SDL), from the directionallyai/RVVM fork at a
+# pinned commit (-netmux and -ro live there). Linux x86_64 only for now; macOS, Windows and arm64 are built (untested)
+# by the fork's own workflow and are not part of this image yet.
+# ---------------------------------------------------------------------------------------------------------------
+
+FROM ubuntu AS rvvm-build
+ARG RVVM_COMMIT=fab0002cae59260b5a7e53f455547870eb8054f5
+ARG SOURCE_DATE_EPOCH
+RUN retry sh -c 'apt-get update -qq -o APT::Update::Error-Mode=any && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+      gcc libc6-dev make git ca-certificates binutils >/dev/null'
+RUN git init -q /rvvm && git -C /rvvm fetch -q --depth 1 https://github.com/directionallyai/RVVM "${RVVM_COMMIT}" \
+ && git -C /rvvm checkout -q FETCH_HEAD
+RUN cd /rvvm && make -s LDFLAGS=-static CFLAGS="-ffile-prefix-map=/rvvm=." \
+      USE_GUI=0 USE_X11=0 USE_WAYLAND=0 USE_SDL=0 USE_NO_DLIB=1 USE_LIB=0 BUILDDIR=build -j"$(nproc)" \
+ && strip --strip-all build/rvvm_x86_64 \
+ && install -m 0755 build/rvvm_x86_64 /rvvm-bin
+
+# ---------------------------------------------------------------------------------------------------------------
+# The carrier: everything the host needs to run the guest, plus manifest.json naming each file by hash. Like the
+# reviewer bundle, this image is only a carrier: the backend copies these files in and publishes them to its
+# content-addressed store, and a client downloads them from there and checks every hash before use.
+#
+#   docker buildx build --target carrier --output type=local,dest=carrier .
+# ---------------------------------------------------------------------------------------------------------------
+
+# The emulator for the hosts that cannot be built here: the fork's own native builds (macOS, Windows and arm64 need native
+# runners), downloaded from its release and pinned by sha256, so BuildKit refuses anything else. Each passed the fork's
+# smoke boots (a tiny guest, with and without the JIT); the guest in this repository has only been booted on
+# linux-x86_64, so the manifest marks the rest untested (rootfs/make-manifest.py).
+FROM scratch AS rvvm-hosts
+ARG RVVM_RELEASE=rvvm-59b3f80af3f2
+ARG RVVM_LINUX_ARM64_SHA256=3157c55d1fac22b9a7f37c2bb67617d33efe2f576a4775aef80921c4df3a6ebb
+ARG RVVM_MACOS_ARM64_SHA256=4b3751e1d83980eee274e1eb5527e34932a128d13e8351ecdfd6ce8e064ee430
+ARG RVVM_MACOS_X86_64_SHA256=ec15bb2eba221b56c201df69d1d7543a854e06b5815cac2e37589ac0667c8ad3
+ARG RVVM_WINDOWS_X86_64_SHA256=4b609248e1b3f9b74a161d1d142f76a1ecb73e223bb3f20ab22df6315fe0237c
+ADD --checksum=sha256:${RVVM_LINUX_ARM64_SHA256} https://github.com/directionallyai/RVVM/releases/download/${RVVM_RELEASE}/rvvm-linux-arm64 /rvvm-linux-arm64
+ADD --checksum=sha256:${RVVM_MACOS_ARM64_SHA256} https://github.com/directionallyai/RVVM/releases/download/${RVVM_RELEASE}/rvvm-macos-arm64 /rvvm-macos-arm64
+ADD --checksum=sha256:${RVVM_MACOS_X86_64_SHA256} https://github.com/directionallyai/RVVM/releases/download/${RVVM_RELEASE}/rvvm-macos-x86_64 /rvvm-macos-x86_64
+ADD --checksum=sha256:${RVVM_WINDOWS_X86_64_SHA256} https://github.com/directionallyai/RVVM/releases/download/${RVVM_RELEASE}/rvvm-windows-x86_64.exe /rvvm-windows-x86_64.exe
+
+FROM ubuntu AS carrier-tree
+COPY --from=artifacts /fw_jump.bin /Image /out/
+COPY --from=rootfs /rootfs.erofs /rootfs.erofs.xz /out/
+COPY --from=rvvm-build /rvvm-bin /out/rvvm-linux-x86_64
+COPY --from=rvvm-hosts /rvvm-* /out/
+COPY rootfs/make-manifest.py /make-manifest.py
+RUN apt-get update -qq >/dev/null 2>&1 || true; command -v python3 >/dev/null || retry sh -c 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3 >/dev/null'; \
+    chmod 0755 /out/rvvm-* && python3 /make-manifest.py /out > /out/manifest.json && rm /out/rootfs.erofs
+
+FROM scratch AS carrier
+COPY --from=carrier-tree /out/ /
